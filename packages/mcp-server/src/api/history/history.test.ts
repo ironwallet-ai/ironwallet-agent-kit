@@ -18,6 +18,8 @@ import { mapEsploraTx, utxoSummary } from "./providers/esplora.js";
 import { mapBlockCypherTx } from "./providers/blockcypher.js";
 import { mapSolanaTx } from "./providers/solana.js";
 import { mapTonJettonTransfer, mapTonTx, toncenterV3 } from "./providers/toncenter.js";
+import { mapTonapiJettonOp, mapTonapiTx, tonapiBlockSeqno } from "./providers/tonapi.js";
+import { isRateLimited, retryRateLimited } from "./pace.js";
 import { mapXrpEntry } from "./providers/xrp.js";
 import type { HistoryItem, HistorySource, SourceContext, SourceItem } from "./types.js";
 
@@ -498,6 +500,122 @@ test("toncenter: incoming TON, outgoing jetton gas call, jetton transfer with me
   assert.equal(jetton.item.asset.symbol, "USDT");
   assert.equal(jetton.item.asset.contractAddress, "EQMaster");
   assert.equal(jetton.item.amount.formatted, "5.0");
+});
+
+test("tonapi: incoming TON, outgoing contract call, jetton transfer, block seqno", () => {
+  const RAW = "0:B113A994B5024A16719F69139328EB759596C38A25F59028B146FECDC3621DFE";
+  const FRIENDLY = "EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs";
+  assert.equal(tonapiBlockSeqno("(0,8000000000000000,94053862)"), 94053862);
+  assert.equal(tonapiBlockSeqno(undefined), null);
+  assert.equal(tonapiBlockSeqno("garbage"), null);
+
+  const incoming = mapTonapiTx(
+    {
+      hash: "173dfd",
+      lt: 100377360000010,
+      utime: 1788169613,
+      success: true,
+      aborted: false,
+      total_fees: 7846,
+      block: "(0,8000000000000000,94053862)",
+      in_msg: { value: 30000000, source: { address: "0:EE1759" }, destination: { address: RAW }, op_code: "0x00000000" },
+      out_msgs: [],
+    },
+    FRIENDLY,
+  )!;
+  assert.equal(incoming.item.direction, "in");
+  assert.equal(incoming.item.kind, "transfer");
+  assert.equal(incoming.item.amount.formatted, "0.03");
+  assert.equal(incoming.item.block, 94053862);
+  assert.equal(incoming.item.fee, null);
+  assert.equal(incoming.item.to, "UQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_p0p", "raw 0:HEX → non-bounceable");
+  assert.equal(incoming.item.timestamp, "2026-08-31T09:46:53.000Z");
+
+  const outgoing = mapTonapiTx(
+    {
+      hash: "o",
+      utime: 1788169613,
+      success: true,
+      total_fees: "449427",
+      in_msg: { value: 0, source: null },
+      out_msgs: [{ value: 50000000, destination: { address: "0:69C4" }, op_code: "0x0f8a7ea5" }],
+    },
+    FRIENDLY,
+  )!;
+  assert.equal(outgoing.item.direction, "out");
+  assert.equal(outgoing.item.kind, "contract_call");
+  assert.equal(outgoing.item.amount.formatted, "0.05");
+  assert.equal(outgoing.item.fee?.raw, "449427");
+
+  const failed = mapTonapiTx({ hash: "f", utime: 1, success: false, in_msg: { value: 1, source: { address: "0:69C4" } } }, FRIENDLY)!;
+  assert.equal(failed.item.status, "failed");
+  assert.equal(mapTonapiTx({ utime: 1 }, FRIENDLY), null);
+
+  const jetton = mapTonapiJettonOp(
+    {
+      operation: "transfer",
+      utime: 1787015716,
+      lt: 97489872000004,
+      transaction_hash: "d11674",
+      source: { address: "0:1D0FD9" },
+      destination: { address: RAW },
+      amount: "10000000000000",
+      jetton: { address: "0:E7B613", symbol: "USD₮", decimals: 6 },
+    },
+    FRIENDLY,
+  )!;
+  assert.equal(jetton.item.direction, "in");
+  assert.equal(jetton.item.kind, "token_transfer");
+  assert.equal(jetton.item.asset.symbol, "USDT");
+  assert.equal(jetton.item.asset.decimals, 6);
+  assert.equal(jetton.item.amount.formatted, "10000000.0");
+  assert.equal(mapTonapiJettonOp({ transaction_hash: "x" }, FRIENDLY), null, "no jetton master → dropped");
+});
+
+test("retryRateLimited: waits out a 429 and retries, passes other errors through", async () => {
+  const rate = Object.assign(new Error("HTTP 429"), { status: 429 });
+  assert.equal(isRateLimited(rate), true);
+  assert.equal(isRateLimited(new Error("boom")), false);
+
+  let calls = 0;
+  const retries: number[] = [];
+  const value = await retryRateLimited(
+    async () => {
+      calls++;
+      if (calls <= 2) throw rate;
+      return "ok";
+    },
+    { waitMs: 1, attempts: 2, onRetry: (n) => retries.push(n) },
+  );
+  assert.equal(value, "ok");
+  assert.equal(calls, 3);
+  assert.deepEqual(retries, [1, 2]);
+
+  calls = 0;
+  await assert.rejects(
+    retryRateLimited(
+      async () => {
+        calls++;
+        throw rate;
+      },
+      { waitMs: 1, attempts: 2 },
+    ),
+    /429/,
+  );
+  assert.equal(calls, 3, "attempts is the number of retries after the first call");
+
+  calls = 0;
+  await assert.rejects(
+    retryRateLimited(
+      async () => {
+        calls++;
+        throw Object.assign(new Error("HTTP 500"), { status: 500 });
+      },
+      { waitMs: 1, attempts: 2 },
+    ),
+    /500/,
+  );
+  assert.equal(calls, 1, "non-429 errors are not retried here");
 });
 
 test("xrp: drops payment, IOU payment, ripple epoch, non-payment", () => {

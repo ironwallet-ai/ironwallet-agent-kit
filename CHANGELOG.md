@@ -5,6 +5,26 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-09-08
+
+### Added
+
+- TON history: `tonapi.io` fallback after TonCenter; TonCenter rate limits are retried.
+
+### Changed
+
+- `get_deposit_qr`: network name on the PNG.
+- `set_wallet_policy`: response warns when the new policy is weaker than the previous one.
+- Vulnerable transitive dependencies bumped; `npm audit` is clean.
+
+### Removed
+
+- `operationId` from `estimate_swap` — a quote cannot be polled with `get_swap_status`.
+
+### Fixed
+
+- Transfer and swap tools reject zero and negative amounts.
+
 ## [1.2.0] - 2026-09-02
 
 ### Added
@@ -83,6 +103,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Release of the IronWallet agent kit and `@ironwallet/mcp-server`.
 
+[1.2.1]: https://github.com/ironwallet/ironwallet-agent-kit/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/ironwallet/ironwallet-agent-kit/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/ironwallet/ironwallet-agent-kit/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/ironwallet/ironwallet-agent-kit/compare/v1.0.3...v1.1.0

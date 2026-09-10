@@ -87,6 +87,17 @@ jobs:
             gh release create "${TAG}" --title "${TAG}" --notes-file /tmp/release-notes.md
             echo "created release ${TAG}"
           done < <(git tag -l 'v[0-9]*' | sort -V)
+      - name: Publish to Smithery
+        env:
+          SMITHERY_API_KEY: ${{ secrets.SMITHERY_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SMITHERY_API_KEY:-}" ]; then
+            echo "SMITHERY_API_KEY is not set; skip Smithery publish"
+            exit 0
+          fi
+          MCPB="$(bash "${GITHUB_WORKSPACE}/.github/scripts/pack-mcpb.sh" /tmp)"
+          npx -y @smithery/cli@4.11.1 mcp publish "${MCPB}" -n ironwallet/mcp-server
       - name: Publish to MCP Registry
         continue-on-error: true
         working-directory: packages/mcp-server
@@ -110,4 +121,18 @@ jobs:
              server.json > server.json.tmp
           mv server.json.tmp server.json
           ./mcp-publisher login dns --domain ironwallet.io --private-key "${MCP_PRIVATE_KEY}"
-          ./mcp-publisher publish
+          ./mcp-publisher publish || echo "mcp-publisher publish exited $?; still hide superseded versions"
+          NAME="$(jq -r .name server.json)"
+          ENC="$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "${NAME}")"
+          curl -fsSL "https://registry.modelcontextprotocol.io/v0/servers/${ENC}/versions" -o /tmp/mcp-versions.json
+          LATEST="$(jq -r '.servers[] | select(._meta["io.modelcontextprotocol.registry/official"].isLatest == true) | .server.version' /tmp/mcp-versions.json)"
+          if [ -z "${LATEST}" ]; then
+            echo "MCP registry: no isLatest version for ${NAME}" >&2
+            exit 1
+          fi
+          echo "MCP registry latest: ${LATEST}"
+          while IFS= read -r ver; do
+            [ -n "${ver}" ] || continue
+            echo "MCP registry: mark ${ver} deleted (superseded by ${LATEST})"
+            ./mcp-publisher status --status deleted --message "Superseded by ${LATEST}" "${NAME}" "${ver}"
+          done < <(jq -r '.servers[] | select(._meta["io.modelcontextprotocol.registry/official"].isLatest != true and ._meta["io.modelcontextprotocol.registry/official"].status == "active") | .server.version' /tmp/mcp-versions.json)

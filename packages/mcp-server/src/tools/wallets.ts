@@ -7,13 +7,15 @@ import { createWallets, loadKeystore, resolveEntry, setPolicy } from "../keystor
 import type { WalletPolicy } from "../keystore/types.js";
 import { requirePassphrase } from "../passphrase.js";
 import {
+  depositCaption,
+  depositLabel,
   depositPayload,
   depositQrUrl,
   renderDepositQrPng,
   selectDepositTargets,
 } from "../qr/deposit-qr.js";
 import { ensureManager } from "../web/manager.js";
-import { compareDecimalAmount, listWalletPolicy } from "../policy.js";
+import { compareDecimalAmount, diffWalletPolicy, listWalletPolicy } from "../policy.js";
 import { logInfo, logWarn } from "../log.js";
 import { consentRequiredPayload, hasCurrentConsent, recordConsent } from "../consent/store.js";
 import { mcpToolConfig, toolDefinition } from "./definitions.js";
@@ -187,15 +189,30 @@ export function registerWalletTools(server: McpServer, helpers: ToolHelpers): vo
             };
           }
 
+          const diff = diffWalletPolicy(previous, policy);
           setPolicy(entry.name, policy);
           logInfo("tool.set_wallet_policy.ok", {
             correlationId,
             wallet: entry.name,
             previous,
             policy,
+            changes: diff.changes,
+            removedRestrictions: diff.removedRestrictions,
           });
+          if (diff.warnings.length > 0) {
+            logWarn("tool.set_wallet_policy.weakened", {
+              correlationId,
+              wallet: entry.name,
+              removedRestrictions: diff.removedRestrictions,
+              warnings: diff.warnings,
+            });
+          }
 
-          const notes: string[] = [];
+          // Warnings go first so hosts that surface only `note` still show them.
+          const notes: string[] = [...diff.warnings];
+          if (diff.unchanged) {
+            notes.push("Policy unchanged: the new policy equals the previous one.");
+          }
           if (policy.enabled && policy.allowedRecipients?.length) {
             notes.push("The recipient allow-list applies to send_transfer.");
           }
@@ -213,6 +230,11 @@ export function registerWalletTools(server: McpServer, helpers: ToolHelpers): vo
             wallet: entry.name,
             previous_policy: previous,
             policy: listWalletPolicy(policy),
+            ...(diff.unchanged ? {} : { changes: diff.changes }),
+            ...(diff.removedRestrictions.length > 0
+              ? { removed_restrictions: diff.removedRestrictions }
+              : {}),
+            ...(diff.warnings.length > 0 ? { warnings: diff.warnings } : {}),
             ...(notes.length > 0 ? { note: notes.join(" ") } : {}),
           });
         },
@@ -238,9 +260,11 @@ export function registerWalletTools(server: McpServer, helpers: ToolHelpers): vo
         const qrs = [];
         for (const t of targets) {
           const payload = depositPayload(t.network, t.address);
-          const png = await renderDepositQrPng(t.address, payload);
+          const png = await renderDepositQrPng(t.address, payload, depositCaption(t));
           qrs.push({
             network: t.network,
+            label: depositLabel(t),
+            ...(t.sharedWith?.length ? { sharedWith: t.sharedWith } : {}),
             address: t.address,
             payload,
             png,
@@ -256,15 +280,12 @@ export function registerWalletTools(server: McpServer, helpers: ToolHelpers): vo
           {
             correlationId,
             wallet: entry.name,
-            qrs: qrs.map(({ network: n, address, payload, qr_url }) => ({
-              network: n,
-              address,
-              payload,
-              qr_url,
-            })),
-            note: managerUrl
-              ? "Show the PNG in chat if the host renders it. If the user cannot see the QR, open qr_url (local-only, 15 minutes) and give the address."
-              : "Show the PNG in chat if the host renders it. If the user cannot see the QR, call open_wallet_manager and use the QR button next to the address.",
+            qrs: qrs.map(({ png: _png, ...rest }) => rest),
+            note:
+              "Each PNG carries the network name above the code and the address below it; images are in the same order as qrs. When showing more than one, still name the network (label) next to each image. " +
+              (managerUrl
+                ? "If the user cannot see the QR, open qr_url (local-only, 15 minutes) and give the address."
+                : "If the user cannot see the QR, call open_wallet_manager and use the QR button next to the address."),
           },
           qrs.map((q) => ({
             type: "image" as const,

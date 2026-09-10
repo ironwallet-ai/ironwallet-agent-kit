@@ -2,6 +2,7 @@ node_modules/
 dist/
 *.tsbuildinfo
 *.tgz
+*.mcpb
 .export/
 npm-debug.log*
 yarn-debug.log*

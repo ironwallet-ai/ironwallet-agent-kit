@@ -109,6 +109,10 @@ export const BAKED_ENV: BakedEnvProfile = {
     "ton": [
       {
         "kind": "toncenter"
+      },
+      {
+        "kind": "tonapi",
+        "url": "https://tonapi.io/v2"
       }
     ],
     "xrp": [

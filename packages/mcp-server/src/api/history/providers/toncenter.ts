@@ -5,9 +5,9 @@
  * or @ton/ton when missing.
  */
 
-import { Address } from "@ton/ton";
 import { httpJson } from "../../http.js";
-import { paced as pacedGate } from "../pace.js";
+import { logInfo } from "../../../log.js";
+import { paced as pacedGate, retryRateLimited } from "../pace.js";
 import {
   amountOf,
   asString,
@@ -26,6 +26,7 @@ import type {
   SourceItem,
   SourcePage,
 } from "../types.js";
+import { TON_NATIVE_ASSET, isPlainOpcode, tonAddr, tonEquals, type TonAddressBook } from "./ton-shared.js";
 
 interface TonMsg {
   source?: string | null;
@@ -55,37 +56,11 @@ export interface TonJettonTransfer {
   jetton_master?: string;
 }
 
-type AddressBook = Record<string, { user_friendly?: string }>;
+type AddressBook = TonAddressBook;
 type JettonMetadata = Record<
   string,
   { token_info?: Array<{ type?: string; symbol?: string; extra?: { decimals?: unknown } }> }
 >;
-
-function tonAddr(raw: string | null | undefined, book: AddressBook | undefined): string | null {
-  if (!raw) return null;
-  const friendly = book?.[raw]?.user_friendly ?? book?.[raw.toUpperCase()]?.user_friendly;
-  if (friendly) return friendly;
-  try {
-    return Address.parse(raw).toString({ bounceable: false });
-  } catch {
-    return raw;
-  }
-}
-
-function tonEquals(a: string | null | undefined, b: string): boolean {
-  if (!a) return false;
-  try {
-    return Address.parse(a).equals(Address.parse(b));
-  } catch {
-    return false;
-  }
-}
-
-/** Plain transfer: no opcode, or opcode 0 (text comment). */
-function isPlainOpcode(opcode: string | null | undefined): boolean {
-  if (!opcode) return true;
-  return /^0x0*$/i.test(opcode);
-}
 
 export function mapTonTx(tx: TonTx, address: string, book: AddressBook | undefined): SourceItem | null {
   const hash = asString(tx.hash);
@@ -99,7 +74,7 @@ export function mapTonTx(tx: TonTx, address: string, book: AddressBook | undefin
   const outMsgs = tx.out_msgs ?? [];
   const outValue = outMsgs.reduce((s, m) => s + toBigInt(m.value ?? 0), 0n);
   const block = typeof tx.mc_block_seqno === "number" ? tx.mc_block_seqno : null;
-  const asset = { symbol: "TON", contractAddress: null, decimals: 9 };
+  const asset = { ...TON_NATIVE_ASSET };
 
   let item: HistoryItem;
   if (outValue > 0n) {
@@ -209,11 +184,28 @@ function headers(): Record<string, string> | undefined {
  * Keyless TonCenter allows about one request per second per IP and answers
  * bursts with 429. The two sources of this provider (and their second pages)
  * are spaced out through one process-wide gate; with an API key the gate is off.
+ *
+ * Measured: a third request within a second gets 429 and the IP stays
+ * suspended for ~2 s, without Retry-After. Traffic from another MCP process
+ * or another machine behind the same NAT eats the same budget, so on 429 we
+ * wait past the suspension and try again instead of failing the provider.
  */
 const KEYLESS_GAP_MS = 1100;
+const RATE_LIMIT_WAIT_MS = 2500;
+const RATE_LIMIT_ATTEMPTS = 2;
 
-function paced<T>(fn: () => Promise<T>): Promise<T> {
-  return apiKey() ? fn() : pacedGate("toncenter", KEYLESS_GAP_MS, fn);
+function paced<T>(fn: () => Promise<T>, ctx: SourceContext): Promise<T> {
+  const call = () => (apiKey() ? fn() : pacedGate("toncenter", KEYLESS_GAP_MS, fn));
+  return retryRateLimited(call, {
+    waitMs: RATE_LIMIT_WAIT_MS,
+    attempts: RATE_LIMIT_ATTEMPTS,
+    onRetry: (attempt) =>
+      logInfo("history.toncenter.rate_limited", {
+        correlationId: ctx.correlationId,
+        attempt,
+        waitMs: RATE_LIMIT_WAIT_MS,
+      }),
+  });
 }
 
 /** `…/api/v2` → `…/api/v3`; a v3 URL is used as is. */
@@ -232,12 +224,14 @@ export function toncenterProvider(v3Base: string, address: string): HistoryProvi
       const url =
         `${v3Base}/transactions?account=${encodeURIComponent(address)}` +
         `&limit=${pageSize}&offset=${offset}&sort=desc`;
-      const res = await paced(() =>
-        httpJson<{ transactions?: TonTx[]; address_book?: AddressBook }>(
-          url,
-          { method: "GET", headers: headers() },
-          { ...ctx.http, label: "history.toncenter.transactions" },
-        ),
+      const res = await paced(
+        () =>
+          httpJson<{ transactions?: TonTx[]; address_book?: AddressBook }>(
+            url,
+            { method: "GET", headers: headers() },
+            { ...ctx.http, label: "history.toncenter.transactions" },
+          ),
+        ctx,
       );
       const rows = Array.isArray(res.transactions) ? res.transactions : null;
       if (!rows) throw new Error("toncenter transactions: unexpected response");
@@ -252,16 +246,18 @@ export function toncenterProvider(v3Base: string, address: string): HistoryProvi
       const url =
         `${v3Base}/jetton/transfers?owner_address=${encodeURIComponent(address)}` +
         `&limit=${pageSize}&offset=${offset}&sort=desc`;
-      const res = await paced(() =>
-        httpJson<{
-          jetton_transfers?: TonJettonTransfer[];
-          address_book?: AddressBook;
-          metadata?: JettonMetadata;
-        }>(
-          url,
-          { method: "GET", headers: headers() },
-          { ...ctx.http, label: "history.toncenter.jettons" },
-        ),
+      const res = await paced(
+        () =>
+          httpJson<{
+            jetton_transfers?: TonJettonTransfer[];
+            address_book?: AddressBook;
+            metadata?: JettonMetadata;
+          }>(
+            url,
+            { method: "GET", headers: headers() },
+            { ...ctx.http, label: "history.toncenter.jettons" },
+          ),
+        ctx,
       );
       const rows = Array.isArray(res.jetton_transfers) ? res.jetton_transfers : null;
       if (!rows) throw new Error("toncenter jetton/transfers: unexpected response");

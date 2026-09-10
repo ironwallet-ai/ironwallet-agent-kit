@@ -104,6 +104,7 @@
               "blockcypher",
               "solana-rpc",
               "toncenter",
+              "tonapi",
               "xrp-rpc"
             ]
           },

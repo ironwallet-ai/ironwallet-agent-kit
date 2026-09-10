@@ -10,6 +10,7 @@ import {
 import type { WalletEntry } from "../keystore/types.js";
 import { requirePassphrase } from "../passphrase.js";
 import { getAccessToken } from "../api/auth.js";
+import { compareDecimalAmount } from "../policy.js";
 import {
   logError,
   logInfo,
@@ -50,6 +51,34 @@ export function fail(err: unknown) {
     isError: true as const,
     content: [{ type: "text" as const, text: `Error: ${message}` }],
   };
+}
+
+/**
+ * Validate a user-supplied asset amount before it reaches the relay or swap
+ * backend. Neither backend rejects zero or negative values: the relay happily
+ * quotes `amount: "-1"` as `-1000000000000000000` wei. Same rules as
+ * `set_wallet_policy.maxPerTxUsd`: plain decimal digits, greater than zero.
+ * Returns the trimmed amount.
+ */
+export function requirePositiveAmount(raw: string, field = "amount"): string {
+  const amount = raw.trim();
+  let cmp: number;
+  try {
+    cmp = compareDecimalAmount(amount, "0");
+  } catch {
+    throw new Error(
+      `${field} must be a positive decimal string like "0.5" or "12" (got "${raw}").`,
+    );
+  }
+  if (cmp === 0) {
+    throw new Error(`${field} must be greater than zero (got "${raw}").`);
+  }
+  return amount;
+}
+
+/** "0", "0.0", " 00 " — a zero placeholder some agents send alongside maxMode. */
+export function isZeroAmount(raw: string): boolean {
+  return /^0+(\.0+)?$/.test(raw.trim());
 }
 
 export type ToolOk = ReturnType<typeof ok>;

@@ -16,6 +16,7 @@ import {
   listSwapAssetsTo,
   listSwapNetworks,
   resolveSwapAsset,
+  SwapError,
   type SwapAsset,
   type SwapSide,
 } from "../api/swap.js";
@@ -27,9 +28,27 @@ import {
   swapAssetInputSchema,
   toolDefinition,
 } from "./definitions.js";
-import type { ToolHelpers } from "./helpers.js";
+import { isZeroAmount, requirePositiveAmount, type ToolHelpers } from "./helpers.js";
 
 type AssetInput = z.infer<typeof swapAssetInputSchema>;
+
+/** SWP code for "Swap order with operationId '…' not found". */
+export const SWAP_ORDER_NOT_FOUND = 10999;
+
+/**
+ * Replace the raw 10999 with guidance. The usual causes are an id copied from
+ * estimate_swap (a quote, not an order) or an execute_swap that failed before
+ * the order was created; neither means the swap service is broken.
+ */
+export function swapOrderNotFoundMessage(operationId: string): string {
+  return (
+    `No swap order with operationId "${operationId}". ` +
+    "Only execute_swap creates an order that get_swap_status can poll; " +
+    "estimate_swap is a quote and has no status. " +
+    "If this id came from execute_swap, the order was not created — check " +
+    "get_balance / get_transaction_history before deciding whether to swap again."
+  );
+}
 
 async function enrichAssets(
   items: SwapAsset[],
@@ -153,6 +172,13 @@ async function prepareSwapSides(
     correlationId: string;
   },
 ) {
+  // Validate before the session so a bad amount fails fast, without a login.
+  // With maxMode a zero amount is a placeholder for "use the balance" (that is
+  // what the backend did before amounts were validated); keep accepting it.
+  let sellAmount: string | undefined;
+  if (opts.amount !== undefined && !(opts.maxMode && isZeroAmount(opts.amount))) {
+    sellAmount = requirePositiveAmount(opts.amount);
+  }
   const { entry, mnemonic, token } = await helpers.session(
     opts.wallet,
     opts.correlationId,
@@ -160,7 +186,6 @@ async function prepareSwapSides(
   const sell = requireSellAddress(entry.addresses, opts.from.network);
   const buy = requireBuyAddress(entry.addresses, opts.to.network);
   const useMax = Boolean(opts.maxMode);
-  let sellAmount = opts.amount;
   if (useMax && !sellAmount) {
     const bal = await getBalance(
       sell.networkId,
@@ -308,9 +333,11 @@ export function registerSwapTools(server: McpServer, helpers: ToolHelpers): void
             },
             { correlationId },
           );
+          // Deliberately no operationId here: the quote id is not a swap order
+          // and get_swap_status answers 10999 "not found" for it. Only
+          // execute_swap returns an id that can be polled.
           return ok({
             correlationId,
-            operationId: est.operationId,
             provider: est.provider,
             amountFrom: est.from.amount ?? prep.sellAmount,
             amountTo: est.to.amount,
@@ -320,7 +347,7 @@ export function registerSwapTools(server: McpServer, helpers: ToolHelpers): void
             details: est.details,
             from: est.from,
             to: est.to,
-            note: "Quote may expire. Call execute_swap to create+sign+broadcast (it performs a fresh estimate).",
+            note: "Quote only — nothing was created or sent, and there is no operationId to poll. Quote may expire. Call execute_swap to create+sign+broadcast (it performs a fresh estimate and returns the operationId for get_swap_status).",
           });
         },
       ),
@@ -459,9 +486,19 @@ export function registerSwapTools(server: McpServer, helpers: ToolHelpers): void
         { wallet, operationId },
         async ({ correlationId }) => {
           const { token } = await session(wallet, correlationId);
-          const status = await getSwapStatus(token, operationId, {
-            correlationId,
-          });
+          let status: Record<string, unknown>;
+          try {
+            status = await getSwapStatus(token, operationId, {
+              correlationId,
+            });
+          } catch (e) {
+            if (e instanceof SwapError && e.code === SWAP_ORDER_NOT_FOUND) {
+              throw new Error(swapOrderNotFoundMessage(operationId), {
+                cause: e,
+              });
+            }
+            throw e;
+          }
           return ok({ correlationId, ...status });
         },
       ),

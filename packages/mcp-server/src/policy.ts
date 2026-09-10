@@ -91,6 +91,148 @@ export function listWalletPolicy(policy: WalletPolicy | undefined): WalletPolicy
   return policy;
 }
 
+/** Restriction fields a policy can carry. */
+export type PolicyRestriction = "readOnly" | "maxPerTxUsd" | "allowedRecipients";
+
+export interface PolicyFieldChange<T> {
+  from: T;
+  to: T;
+}
+
+export interface PolicyDiff {
+  /** True when the effective restrictions did not change. */
+  unchanged: boolean;
+  /** Per-field before/after for fields whose effective value changed. */
+  changes: {
+    enabled?: PolicyFieldChange<boolean>;
+    readOnly?: PolicyFieldChange<boolean>;
+    maxPerTxUsd?: PolicyFieldChange<string | null>;
+    allowedRecipients?: PolicyFieldChange<string[] | null>;
+  };
+  /** Restrictions that were in force before and are gone now. */
+  removedRestrictions: PolicyRestriction[];
+  /**
+   * Human-readable alerts for every way the new policy is weaker than the old
+   * one. Empty when nothing was loosened.
+   */
+  warnings: string[];
+}
+
+/** Restrictions actually in force: a disabled policy enforces nothing. */
+function effectiveRestrictions(policy: WalletPolicy | undefined): {
+  readOnly: boolean;
+  maxPerTxUsd: string | null;
+  allowedRecipients: string[] | null;
+} {
+  if (!policy || !policy.enabled) {
+    return { readOnly: false, maxPerTxUsd: null, allowedRecipients: null };
+  }
+  const recipients = (policy.allowedRecipients ?? []).filter((a) => a.length > 0);
+  return {
+    readOnly: policy.readOnly === true,
+    maxPerTxUsd: policy.maxPerTxUsd ?? null,
+    allowedRecipients: recipients.length > 0 ? recipients : null,
+  };
+}
+
+function sameRecipients(a: string[] | null, b: string[] | null): boolean {
+  if (a === null || b === null) return a === b;
+  if (a.length !== b.length) return false;
+  const sb = new Set(b);
+  return a.every((x) => sb.has(x));
+}
+
+/**
+ * Compare the restrictions in force before and after a `set_wallet_policy`
+ * write. The tool is a full replace, so an omitted field silently disappears;
+ * this diff is what makes that visible in the response instead of leaving the
+ * agent to compare `previous_policy` and `policy` by eye.
+ */
+export function diffWalletPolicy(
+  previous: WalletPolicy | undefined,
+  next: WalletPolicy | undefined,
+): PolicyDiff {
+  const before = effectiveRestrictions(previous);
+  const after = effectiveRestrictions(next);
+  const wasEnabled = previous?.enabled === true;
+  const isEnabled = next?.enabled === true;
+  const disabledNow = wasEnabled && !isEnabled;
+  // When the caller passed enabled=false the loss is intentional; the
+  // full-replace reminder only makes sense when a field was merely omitted.
+  const omittedHint = disabledNow
+    ? ""
+    : " set_wallet_policy is a full replace — if you only meant to change another field, call again and include it.";
+
+  const diff: PolicyDiff = {
+    unchanged: true,
+    changes: {},
+    removedRestrictions: [],
+    warnings: [],
+  };
+  if (wasEnabled !== isEnabled) {
+    diff.changes.enabled = { from: wasEnabled, to: isEnabled };
+  }
+
+  if (before.readOnly !== after.readOnly) {
+    diff.changes.readOnly = { from: before.readOnly, to: after.readOnly };
+    if (before.readOnly) {
+      diff.removedRestrictions.push("readOnly");
+      diff.warnings.push(
+        `readOnly was removed: the wallet can send and swap again.${omittedHint}`,
+      );
+    }
+  }
+
+  if (before.maxPerTxUsd !== after.maxPerTxUsd) {
+    diff.changes.maxPerTxUsd = { from: before.maxPerTxUsd, to: after.maxPerTxUsd };
+    if (before.maxPerTxUsd !== null && after.maxPerTxUsd === null) {
+      diff.removedRestrictions.push("maxPerTxUsd");
+      diff.warnings.push(
+        `maxPerTxUsd was removed (was ${before.maxPerTxUsd} USD): sends and swaps are no longer capped by USD value.${omittedHint}`,
+      );
+    } else if (before.maxPerTxUsd !== null && after.maxPerTxUsd !== null) {
+      // The stored value may predate validation; a malformed old limit must
+      // not block the write that replaces it. Treat it as "unknown → changed".
+      let raised = false;
+      try {
+        raised = compareDecimalAmount(after.maxPerTxUsd, before.maxPerTxUsd) > 0;
+      } catch {
+        raised = false;
+      }
+      if (raised) {
+        diff.warnings.push(
+          `maxPerTxUsd was raised from ${before.maxPerTxUsd} to ${after.maxPerTxUsd} USD.`,
+        );
+      }
+    }
+  }
+
+  if (!sameRecipients(before.allowedRecipients, after.allowedRecipients)) {
+    diff.changes.allowedRecipients = {
+      from: before.allowedRecipients,
+      to: after.allowedRecipients,
+    };
+    if (before.allowedRecipients !== null && after.allowedRecipients === null) {
+      const n = before.allowedRecipients.length;
+      diff.removedRestrictions.push("allowedRecipients");
+      diff.warnings.push(
+        `allowedRecipients was removed (was ${n} address${n === 1 ? "" : "es"}): the wallet can now send to any address.${omittedHint}`,
+      );
+    } else if (before.allowedRecipients !== null && after.allowedRecipients !== null) {
+      const prev = new Set(before.allowedRecipients);
+      const added = after.allowedRecipients.filter((a) => !prev.has(a));
+      if (added.length > 0) {
+        diff.warnings.push(
+          `allowedRecipients gained ${added.length} address${added.length === 1 ? "" : "es"}: ${added.join(", ")}.`,
+        );
+      }
+    }
+  }
+
+  diff.unchanged = Object.keys(diff.changes).length === 0;
+  return diff;
+}
+
 /** Throws with a clear message if the operation violates the wallet policy. */
 export function enforcePolicy(entry: WalletEntry, check: PolicyCheck): void {
   const policy = entry.policy;

@@ -32,11 +32,13 @@ import {
 import { requirePassphrase } from "../passphrase.js";
 import { logError, logInfo } from "../log.js";
 import {
+  depositCaption,
   depositPayload,
   renderDepositQrPng,
   uniqueDepositTargets,
   walletOwnsDeposit,
 } from "../qr/deposit-qr.js";
+import type { NetworkId } from "../networks.js";
 import {
   CONSENT_BULLETS,
   CONSENT_CHECKBOX,
@@ -649,10 +651,10 @@ export async function ensureManager(): Promise<string> {
           const parsed = new URL(req.url ?? "/", "http://127.0.0.1");
           const network = parsed.searchParams.get("network") ?? "";
           const address = parsed.searchParams.get("address") ?? "";
-          const owned = loadKeystore().wallets.some((w) =>
+          const owner = loadKeystore().wallets.find((w) =>
             walletOwnsDeposit(w.addresses, network, address),
           );
-          if (!owned) {
+          if (!owner) {
             html(
               res,
               404,
@@ -664,7 +666,17 @@ export async function ensureManager(): Promise<string> {
             );
             return;
           }
-          const png = await renderDepositQrPng(address, depositPayload(network, address));
+          // The dashboard lists one row per address (EVM collapsed), so the
+          // caption should say the same thing the row does.
+          const target =
+            uniqueDepositTargets(owner.addresses).find(
+              (t) => t.network === network && t.address === address,
+            ) ?? { network: network as NetworkId, address };
+          const png = await renderDepositQrPng(
+            address,
+            depositPayload(network, address),
+            depositCaption(target),
+          );
           res.writeHead(200, {
             "Content-Type": "image/png",
             "Cache-Control": "no-store, no-cache, must-revalidate, private",

@@ -43,7 +43,7 @@ Skill: `/ironwallet-mcp`. Agent: `ironwallet-operator`.
 
 ## Configuration
 
-Nothing to paste into MCP config for normal use. On first launch the server writes a relay API key, keystore wrapping secret, and device id under `~/.ironwallet-mcp/` (mode `0600`). Override with `IW_RELAY_API_KEY` / `IW_PASSPHRASE` / `IW_DEVICE_ID` only if you must.
+Nothing to paste into MCP config for normal use. On first launch the server writes a relay API key, keystore wrapping secret, device id, and installation id under `~/.ironwallet-mcp/` (mode `0600`). Override with `IW_RELAY_API_KEY` / `IW_PASSPHRASE` / `IW_DEVICE_ID` only if you must.
 
 The user-facing backup is the **recovery phrase** in the wallet manager, not those files.
 
