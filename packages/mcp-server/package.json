@@ -1,6 +1,6 @@
 {
   "name": "@ironwallet/mcp-server",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "mcpName": "io.ironwallet/mcp-server",
   "license": "MIT",
   "description": "Non-custodial IronWallet MCP: seeds stay encrypted on the host. Balances, local signing, transfers, and swaps across 10+ networks.",
@@ -48,7 +48,7 @@
   "main": "dist/server.js",
   "scripts": {
     "build": "tsc",
-    "test": "tsx --test src/qr/deposit-qr.test.ts src/restrict-private-file.test.ts src/config.device-info.test.ts src/device-fingerprint.test.ts src/consent/store.test.ts src/keystore/store.test.ts src/web/manager.test.ts src/tools/schema-wire.test.ts src/policy.usd.test.ts src/api/rates.test.ts src/api/swap-slim.test.ts src/api/history/history.test.ts src/npm-registry.test.ts",
+    "test": "tsx --test src/qr/deposit-qr.test.ts src/restrict-private-file.test.ts src/config.device-info.test.ts src/device-fingerprint.test.ts src/device-id.test.ts src/consent/store.test.ts src/keystore/store.test.ts src/web/manager.test.ts src/tools/schema-wire.test.ts src/tools/amount.test.ts src/tools/swap-status.test.ts src/policy.usd.test.ts src/policy.diff.test.ts src/api/rates.test.ts src/api/swap-slim.test.ts src/api/history/history.test.ts src/npm-registry.test.ts",
     "start": "node dist/cli.js",
     "dev": "tsx src/cli.ts",
     "prepack": "npm run build"

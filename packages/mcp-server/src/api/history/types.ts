@@ -114,6 +114,7 @@ export type HistoryApiKind =
   | "blockcypher"
   | "solana-rpc"
   | "toncenter"
+  | "tonapi"
   | "xrp-rpc";
 
 /** One entry of the per-network provider chain in the baked profile. */
@@ -141,5 +142,6 @@ export const HISTORY_API_KINDS: readonly HistoryApiKind[] = [
   "blockcypher",
   "solana-rpc",
   "toncenter",
+  "tonapi",
   "xrp-rpc",
 ];

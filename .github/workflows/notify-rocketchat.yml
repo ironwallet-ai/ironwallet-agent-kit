@@ -1,0 +1,96 @@
+# Posts opened PRs and published GitHub Releases to Rocket.Chat
+# #iw-mcp-github-notifications. Webhook URL is repo/org secret ROCKETCHAT_WEBHOOK_URL
+# (Incoming Webhook bound to that room). pull_request_target so fork PRs still notify;
+# this job only reads github.event and POSTs, it does not check out PR code.
+name: notify-rocketchat
+
+on:
+  pull_request_target:
+    types: [opened]
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  rocketchat:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post to Rocket.Chat
+        env:
+          WEBHOOK: ${{ secrets.ROCKETCHAT_WEBHOOK_URL }}
+          EVENT_NAME: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+          ARTIFACT: npm
+          NPM_PACKAGE: "@ironwallet/mcp-server"
+        run: |
+          set -euo pipefail
+          if [ -z "${WEBHOOK:-}" ]; then
+            echo "ROCKETCHAT_WEBHOOK_URL is not set; skip"
+            exit 0
+          fi
+          python3 - <<'PY'
+          import json, os, urllib.error, urllib.request
+
+          webhook = os.environ["WEBHOOK"]
+          event_name = os.environ["EVENT_NAME"]
+          repo = os.environ["REPO"]
+          event = json.load(open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8"))
+
+          def clip(value, limit=3500):
+              text = (value or "").strip()
+              if not text:
+                  return "—"
+              if len(text) <= limit:
+                  return text
+              return text[:limit].rstrip() + "\n…"
+
+          def artifact_url(tag):
+              kind = os.environ.get("ARTIFACT", "")
+              version = (tag or "").lstrip("v")
+              if kind == "npm":
+                  pkg = os.environ["NPM_PACKAGE"]
+                  return f"https://www.npmjs.com/package/{pkg}/v/{version}"
+              if kind == "cdn":
+                  base = os.environ["CDN_BASE"].rstrip("/")
+                  folder = tag if (tag or "").startswith("v") else f"v{version}"
+                  return f"{base}/{folder}/"
+              raise SystemExit(f"unknown ARTIFACT {kind!r}")
+
+          if event_name in ("pull_request", "pull_request_target"):
+              pr = event["pull_request"]
+              text = (
+                  f"**Открыт PR** `{repo}`\n"
+                  f"- **ветка:** `{pr['head']['ref']}`\n"
+                  f"- **название:** {pr['title']}\n"
+                  f"- **описание:**\n{clip(pr.get('body'))}\n"
+                  f"- **ссылка:** {pr['html_url']}"
+              )
+          elif event_name == "release":
+              rel = event["release"]
+              tag = rel.get("tag_name") or ""
+              name = (rel.get("name") or tag).strip() or tag
+              text = (
+                  f"**Выпущен релиз** `{repo}`\n"
+                  f"- **название:** {name}\n"
+                  f"- **релиз ноутс:**\n{clip(rel.get('body'))}\n"
+                  f"- **артефакт:** {artifact_url(tag)}"
+              )
+          else:
+              raise SystemExit(f"unexpected event {event_name}")
+
+          body = json.dumps({"text": text}, ensure_ascii=False).encode()
+          req = urllib.request.Request(
+              webhook,
+              data=body,
+              method="POST",
+              headers={"Content-Type": "application/json"},
+          )
+          try:
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  resp.read()
+          except urllib.error.HTTPError as e:
+              raise SystemExit(f"Rocket.Chat webhook HTTP {e.code}") from e
+          print("posted")
+          PY

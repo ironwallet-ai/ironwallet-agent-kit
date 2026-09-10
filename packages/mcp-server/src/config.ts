@@ -19,9 +19,11 @@ import {
 } from "./api/history/types.js";
 import { resolveDeviceFingerprint } from "./device-fingerprint.js";
 import {
-  resolveDeviceId,
+  formatDeviceId,
   resolveKeystoreDir,
+  resolveInstallationId,
   resolveKeystorePassphrase,
+  resolveRawDeviceId,
   resolveRelayApiKey,
 } from "./local-secrets.js";
 
@@ -122,15 +124,18 @@ export interface Config {
   relayApiKey: string;
   /** App version string sent as x-iwt-cli / X-App-Version. */
   appVersion: string;
-  /** Device id sent as X-Device-Id. UUID file under the keystore dir unless overridden. */
+  /** Device id sent as X-Device-Id: `web:<uuid>`. UUID file under the keystore dir unless overridden. */
   deviceId: string;
   /** Machine fingerprint sent as X-Device-Fingerprint. OS install id + platform, or device-id if that id is missing. */
   deviceFingerprint: string;
+  /** X-Installation-ID, `<uuid>:<unix ns>`. File under the keystore dir. */
+  installationId: string;
   /** X-Device-Locale value, format: TimeZone=..;Language=..;Region=..; */
   deviceLocale: string;
   /**
-   * JSON for `X-Device-Info`. The swap API keys routing off `systemName`
-   * (`Web` here — this is a desktop MCP, not a phone).
+   * JSON for `X-Device-Info` (plain) and `X-Device-Info-Base64` (the form the
+   * swap gateway decodes first). The swap API keys routing off `systemName`
+   * (`Web` here — this is a desktop MCP).
    */
   deviceInfo: string;
   /** Directory holding the encrypted keystore. */
@@ -301,7 +306,9 @@ let cached: Config | null = null;
 export function getConfig(): Config {
   if (cached) return cached;
   resolveKeystorePassphrase();
-  const deviceId = resolveDeviceId();
+  // Raw UUID stays the fingerprint fallback so existing installs keep the same
+  // X-Device-Fingerprint; only the header value gains the `web:` prefix.
+  const rawDeviceId = resolveRawDeviceId();
   const profile = BAKED_ENV;
   cached = {
     authUrl: envOr("IW_AUTH_URL", profile.authUrl),
@@ -312,11 +319,15 @@ export function getConfig(): Config {
     ratesApiUrl: envOr("IW_RATES_API_URL", profile.ratesApiUrl ?? ""),
     staticResourcesUrl: envOr("IW_STATIC_RESOURCES_URL", profile.staticResourcesUrl ?? ""),
     relayApiKey: resolveRelayApiKey(),
-    appVersion: envOr("IW_APP_VERSION", `ironwallet-mcp/${packageVersion()}`),
-    deviceId,
-    deviceFingerprint: resolveDeviceFingerprint(deviceId),
-    deviceLocale: envOr("IW_DEVICE_LOCALE", defaultDeviceLocale()),
-    deviceInfo: envOr("IW_DEVICE_INFO", defaultDeviceInfo()),
+    // Identity headers are not overridable: the backend routes swaps off
+    // deviceInfo.systemName and reads appVersion for client metrics, so a
+    // spoofed value only breaks support.
+    appVersion: `ironwallet-mcp/${packageVersion()}`,
+    deviceId: formatDeviceId(rawDeviceId),
+    deviceFingerprint: resolveDeviceFingerprint(rawDeviceId),
+    installationId: resolveInstallationId(),
+    deviceLocale: defaultDeviceLocale(),
+    deviceInfo: defaultDeviceInfo(),
     keystoreDir: resolveKeystoreDir(),
     evmRpcUrls: resolveEvmRpcUrls(profile.evmRpcUrls),
     tronApiUrl: envOr("IW_TRON_API", profile.tronApiUrl),
@@ -358,7 +369,11 @@ export function commonHeaders(cfg: Config): Record<string, string> {
     // Backend validates the format: TimeZone=..;Language=..;Region=..;
     "X-Device-Locale": cfg.deviceLocale,
     // Swap routing reads UserData.XDeviceInfo.systemName (`Web` for this client).
+    // Plain JSON is what the MCP proxy reads for metrics; the swap gateway
+    // decodes the base64 form first. Same payload in both.
     "X-Device-Info": cfg.deviceInfo,
+    "X-Device-Info-Base64": Buffer.from(cfg.deviceInfo, "utf8").toString("base64"),
+    "X-Installation-ID": cfg.installationId,
     "Content-Language": "en",
   };
   if (cfg.relayApiKey) headers["x-api-key"] = cfg.relayApiKey;

@@ -13,7 +13,7 @@ import { tonPublicKeyHex } from "../signing/ton.js";
 import { enforcePolicy, enforceUsdLimit } from "../policy.js";
 import { logInfo, logWarn } from "../log.js";
 import { mcpToolConfig, toolDefinition } from "./definitions.js";
-import type { ToolHelpers } from "./helpers.js";
+import { requirePositiveAmount, type ToolHelpers } from "./helpers.js";
 
 interface ResolvedAmount {
   est: SignedEstimate;
@@ -195,14 +195,15 @@ export function registerTransferTools(server: McpServer, helpers: ToolHelpers): 
   server.registerTool(
     "estimate_transfer",
     mcpToolConfig(toolDefinition("estimate_transfer")),
-    async ({ wallet, network, to, amount, tokenAddress, memo }) =>
+    async ({ wallet, network, to, amount: rawAmount, tokenAddress, memo }) =>
       withToolLog(
         "estimate_transfer",
-        { wallet, network, to, amount, tokenAddress, hasMemo: Boolean(memo) },
+        { wallet, network, to, amount: rawAmount, tokenAddress, hasMemo: Boolean(memo) },
         async ({ correlationId }) => {
           if (!canSend(network)) {
             throw new Error(`Sending on "${network}" is not supported.`);
           }
+          const amount = requirePositiveAmount(rawAmount);
           const { entry, mnemonic, token } = await session(wallet, correlationId);
           const address = entry.addresses[network];
           const fromPublicKey =
@@ -235,15 +236,16 @@ export function registerTransferTools(server: McpServer, helpers: ToolHelpers): 
   server.registerTool(
     "send_transfer",
     mcpToolConfig(toolDefinition("send_transfer")),
-    async ({ wallet, network, to, amount, tokenAddress, memo }) =>
+    async ({ wallet, network, to, amount: rawAmount, tokenAddress, memo }) =>
       withToolLog(
         "send_transfer",
-        { wallet, network, to, amount, tokenAddress, hasMemo: Boolean(memo) },
+        { wallet, network, to, amount: rawAmount, tokenAddress, hasMemo: Boolean(memo) },
         async ({ correlationId, started }) => {
           assertServerWritable("send");
           if (!canSend(network)) {
             throw new Error(`Sending on "${network}" is not supported.`);
           }
+          const amount = requirePositiveAmount(rawAmount);
           const { entry, mnemonic, token } = await session(wallet, correlationId);
           const address = entry.addresses[network];
           logInfo("tool.send_transfer.session", {

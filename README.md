@@ -8,6 +8,8 @@ Seed-compatible with the [IronWallet](https://ironwallet.io) app. There is no pe
 
 Product page: [ironwallet.io/ai](https://ironwallet.io/ai). Machine-readable index: [llms.txt](llms.txt).
 
+[![npm](https://img.shields.io/npm/v/@ironwallet/mcp-server)](https://www.npmjs.com/package/@ironwallet/mcp-server) [![Smithery](https://img.shields.io/badge/Smithery-ironwallet%2Fmcp--server-4B32C3)](https://smithery.ai/servers/ironwallet/mcp-server)
+
 Opening this repository in Claude Code starts the wallet MCP via [`.mcp.json`](.mcp.json). See [CLAUDE.md](CLAUDE.md).
 
 ## Install
@@ -107,7 +109,7 @@ No tool accepts or returns a seed. Import, backup, and delete only in the local 
 
 ## Configuration
 
-Nothing to paste into MCP config for normal use. On first launch the server writes a relay API key, keystore wrapping secret, and device id under `~/.ironwallet-mcp/` (mode `0600`). Override with `IW_RELAY_API_KEY` / `IW_PASSPHRASE` / `IW_DEVICE_ID` only if you must.
+Nothing to paste into MCP config for normal use. On first launch the server writes a relay API key, keystore wrapping secret, device id, and installation id under `~/.ironwallet-mcp/` (mode `0600`). Override with `IW_RELAY_API_KEY` / `IW_PASSPHRASE` / `IW_DEVICE_ID` only if you must.
 
 The user-facing backup is the **recovery phrase** in the wallet manager, not those files.
 

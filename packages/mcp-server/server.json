@@ -3,7 +3,7 @@
   "name": "io.ironwallet/mcp-server",
   "title": "IronWallet",
   "description": "Non-custodial crypto wallet MCP: check balances, sign and send transfers, and swap tokens locally.",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "websiteUrl": "https://ironwallet.io/ai",
   "icons": [
     {
@@ -21,7 +21,7 @@
     {
       "registryType": "npm",
       "identifier": "@ironwallet/mcp-server",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "runtimeHint": "npx",
       "environmentVariables": [
         {

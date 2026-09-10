@@ -120,7 +120,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     name: "set_wallet_policy",
     title: "Set wallet policy",
     description:
-      "Replace the spending policy of a wallet (chat intent is the authorization; no extra confirmation). FULL REPLACE, not a patch: read list_wallets first and pass every field you want to keep. enabled=false removes all limits. readOnly blocks send_transfer and execute_swap. maxPerTxUsd caps each send/swap by USD value at the moment of the operation (rate from the IronWallet backend; if the rate is unavailable the operation is rejected — fail closed). allowedRecipients applies to send_transfer destinations. Use only when the user explicitly asks to change limits.",
+      "Replace the spending policy of a wallet (chat intent is the authorization; no extra confirmation). FULL REPLACE, not a patch: read list_wallets first and pass every field you want to keep. enabled=false removes all limits. readOnly blocks send_transfer and execute_swap. maxPerTxUsd caps each send/swap by USD value at the moment of the operation (rate from the IronWallet backend; if the rate is unavailable the operation is rejected — fail closed). allowedRecipients applies to send_transfer destinations. The response lists changes, removed_restrictions, and warnings whenever the new policy is weaker than the previous one (e.g. an omitted allow-list) — relay those warnings to the user. Use only when the user explicitly asks to change limits.",
     purpose: "Replace per-wallet limits (`readOnly`, `maxPerTxUsd`, allow-list)",
     movesFunds: false,
     inputSchema: {
@@ -150,7 +150,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     name: "get_deposit_qr",
     title: "Deposit QR",
     description:
-      "PNG QR to receive funds (generated on the fly; IW mark, address under the code). Pass network for one chain; omit it for one QR per unique address. Does not move funds. Never returns keys or seed phrases. Show the attached image in chat when the host renders it. Each item also has qr_url — open that local URL if the user cannot see the QR, and always write the address in the reply.",
+      "PNG QR to receive funds (generated on the fly; network name above the code, IW mark, address under it). Pass network for one chain; omit it for one QR per unique address — the shared EVM address is one QR captioned with every chain it serves (sharedWith). Does not move funds. Never returns keys or seed phrases. Show the attached images in chat when the host renders them and name each one by its label. Each item also has qr_url — open that local URL if the user cannot see the QR, and always write the address in the reply.",
     purpose: "PNG QR (try chat; else local `qr_url`)",
     movesFunds: false,
     inputSchema: {
@@ -210,7 +210,9 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       wallet: z.string().optional(),
       network: networkEnum,
       to: z.string().describe("Recipient address."),
-      amount: z.string().describe("Amount in asset units (decimal string)."),
+      amount: z
+        .string()
+        .describe("Amount in asset units as a positive decimal string, e.g. \"0.5\". Zero and negative values are rejected."),
       tokenAddress: z
         .string()
         .optional()
@@ -229,7 +231,9 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       wallet: z.string().optional(),
       network: networkEnum,
       to: z.string().describe("Recipient address."),
-      amount: z.string().describe("Amount in asset units (decimal string)."),
+      amount: z
+        .string()
+        .describe("Amount in asset units as a positive decimal string, e.g. \"0.5\". Zero and negative values are rejected."),
       tokenAddress: z
         .string()
         .optional()
@@ -282,7 +286,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     name: "estimate_swap",
     title: "Estimate swap",
     description:
-      "Get a swap quote (amounts, fees, operationId). Quote can expire — prefer execute_swap for sending (it re-estimates). Amount is a decimal string; set maxMode=true to sell the full balance (backend corrects amount).",
+      "Get a swap quote (amounts, fees). Read-only: no order is created and no operationId is returned — there is nothing to poll with get_swap_status until execute_swap. Quote can expire — prefer execute_swap for sending (it re-estimates). Amount is a decimal string; set maxMode=true to sell the full balance (backend corrects amount).",
     purpose: "Quote (may expire)",
     movesFunds: false,
     inputSchema: {
@@ -292,7 +296,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       amount: z
         .string()
         .optional()
-        .describe("Sell amount as decimal string. Required unless maxMode."),
+        .describe("Sell amount as a positive decimal string (zero and negative are rejected). Required unless maxMode."),
       maxMode: z.boolean().optional(),
     },
   },
@@ -310,19 +314,22 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       amount: z
         .string()
         .optional()
-        .describe("Sell amount as decimal string. Required unless maxMode."),
+        .describe("Sell amount as a positive decimal string (zero and negative are rejected). Required unless maxMode."),
       maxMode: z.boolean().optional(),
     },
   },
   {
     name: "get_swap_status",
     title: "Get swap status",
-    description: "Poll swap order/operation status by operationId.",
+    description:
+      "Poll swap order status by the operationId returned by execute_swap. Only executed swaps have a status; estimate_swap does not create an order.",
     purpose: "Poll a swap",
     movesFunds: false,
     inputSchema: {
       wallet: z.string().optional(),
-      operationId: z.string(),
+      operationId: z
+        .string()
+        .describe("operationId from the execute_swap response."),
     },
   },
 ];

@@ -17,6 +17,7 @@ import { esploraProvider } from "./providers/esplora.js";
 import { etherscanProvider } from "./providers/etherscan.js";
 import { noderealProvider } from "./providers/nodereal.js";
 import { solanaProvider } from "./providers/solana.js";
+import { tonapiProvider } from "./providers/tonapi.js";
 import { toncenterProvider, toncenterV3 } from "./providers/toncenter.js";
 import { trongridProvider } from "./providers/trongrid.js";
 import { tronscanProvider } from "./providers/tronscan.js";
@@ -99,6 +100,8 @@ export function buildProvider(spec: HistoryApiSpec, network: NetworkId, address:
       return network === "solana" ? solanaProvider(url, address) : null;
     case "toncenter":
       return network === "ton" ? toncenterProvider(toncenterV3(url) ?? url, address) : null;
+    case "tonapi":
+      return network === "ton" ? tonapiProvider(url, address) : null;
     case "xrp-rpc":
       return network === "xrp" ? xrpProvider(url, address) : null;
     default:

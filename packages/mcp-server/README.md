@@ -121,7 +121,7 @@ Swaps are a separate flow from transfers.
 2. `list_swap_assets` (`direction=from`, then `direction=to` with the chosen sell asset)
 3. Copy **network, symbol, address, decimals** from the catalog into `estimate_swap` / `execute_swap` (especially for tokens)
 4. `estimate_swap` for a preview, or go straight to `execute_swap`
-5. Poll with `get_swap_status` using `operationId`
+5. Poll with `get_swap_status` using the `operationId` from `execute_swap` (`estimate_swap` is a quote and has no status)
 
 **Useful options**
 
@@ -146,13 +146,16 @@ The user-facing backup is the **recovery phrase** in the wallet manager, not tho
 | `IW_PASSPHRASE` | generated locally | Override keystore wrapping secret |
 | `IW_READ_ONLY` | `false` | Process-wide: reject `send_transfer` and `execute_swap`. `true`/`1` enable; `false`/`0`/`off`/`no` disable. Distinct from per-wallet `policy.readOnly`. |
 | `IW_RELAY_API_KEY` | generated UUID | Override `x-api-key` |
-| `IW_DEVICE_ID` | generated UUID | Override `X-Device-Id` (stable per keystore directory) |
+| `IW_DEVICE_ID` | generated UUID | Override the device UUID (stable per keystore directory). Sent as `X-Device-Id: web:<uuid>`; a value that already has a `platform:` prefix is sent unchanged |
 | `IW_KEYSTORE_DIR` | `~/.ironwallet-mcp` | Keystore directory |
 | `IW_RATES_API_URL` | baked profile | Rates backend for `maxPerTxUsd` valuation. Unset in the profile → USD limits reject (fail closed) |
 | `IW_STATIC_RESOURCES_URL` | baked profile | Static asset catalogs (token → rates id) |
 | `IW_HTTP_TIMEOUT_MS` | `15000` | General HTTP timeout (1s–120s) |
 | `IW_HTTP_FORWARD_TIMEOUT_MS` | `60000` | Longer timeout for broadcast-style calls. A client timeout does not always mean the operation failed — check status |
 | `IW_HTTP_RETRIES` | `2` | Retries for safe/idempotent calls; broadcasts are not auto-retried |
+| `IW_HISTORY_APIS` | baked profile | JSON `{ "<network>": [{ "kind", "url"? }, …] }` — per-network chain of history indexers for `get_transaction_history`, tried in order. Kinds: `etherscan`, `nodereal`, `tronscan`, `trongrid`, `esplora`, `blockcypher`, `solana-rpc`, `toncenter`, `tonapi`, `xrp-rpc` |
+| `IW_TON_API_KEY` | unset | TonCenter API key. Keyless TonCenter is ~1 request/s per IP (shared by every process behind the same NAT) |
+| `IW_TONAPI_KEY` | unset | tonapi.io Bearer token for the `tonapi` history fallback; keyless is ~1 request/s per IP |
 | `IW_LOG_ENABLED` | `1` | JSONL diagnostics to a log file (`0` to disable) |
 | `IW_LOG_FILE` | `{keystoreDir}/logs/iw-mcp-YYYY-MM-DD.jsonl` | Log path |
 | `IW_LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |

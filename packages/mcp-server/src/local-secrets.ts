@@ -15,6 +15,7 @@ import { restrictPrivateFile } from "./restrict-private-file.js";
 const RELAY_KEY_FILE = "relay-api-key";
 const PASSPHRASE_FILE = "keystore-passphrase";
 const DEVICE_ID_FILE = "device-id";
+const INSTALLATION_ID_FILE = "installation-id";
 
 export function resolveKeystoreDir(): string {
   if (process.env.IW_KEYSTORE_DIR) return process.env.IW_KEYSTORE_DIR;
@@ -61,9 +62,46 @@ export function resolveKeystorePassphrase(): string {
   return readOrCreate(PASSPHRASE_FILE, () => randomBytes(24).toString("base64url"));
 }
 
-/** X-Device-Id. UUID, stable per keystore directory. */
-export function resolveDeviceId(): string {
+/** Platform tag the backend expects in front of the device UUID. */
+export const DEVICE_ID_PLATFORM = "web";
+
+/**
+ * Bare UUID as stored in `device-id` (or `IW_DEVICE_ID`). Stable per keystore
+ * directory. Used as fingerprint fallback material; the wire value is
+ * `formatDeviceId()` of this.
+ */
+export function resolveRawDeviceId(): string {
   const fromEnv = process.env.IW_DEVICE_ID;
   if (!isUnsetSecret(fromEnv)) return fromEnv!.trim();
   return readOrCreate(DEVICE_ID_FILE, () => randomUUID());
+}
+
+/**
+ * `web:<uuid>` for X-Device-Id. A bare UUID (existing installs, env override)
+ * gets the `web:` prefix so the identity part stays the same. A value that
+ * already carries a `platform:` prefix is sent as is.
+ */
+export function formatDeviceId(raw: string): string {
+  const value = raw.trim();
+  if (/^[A-Za-z][A-Za-z0-9_-]*:/.test(value)) return value;
+  return `${DEVICE_ID_PLATFORM}:${value}`;
+}
+
+/** X-Device-Id, `web:<uuid>`. */
+export function resolveDeviceId(): string {
+  return formatDeviceId(resolveRawDeviceId());
+}
+
+/**
+ * `<uuid>:<unix nanoseconds>` — the X-Installation-ID format the backend
+ * expects. Minted once per keystore directory and kept, so a new id means a
+ * fresh install (or a wiped keystore).
+ */
+export function newInstallationId(now: number = Date.now()): string {
+  return `${randomUUID()}:${BigInt(Math.trunc(now)) * 1_000_000n}`;
+}
+
+/** X-Installation-ID. Stable per keystore directory; no env override on purpose. */
+export function resolveInstallationId(): string {
+  return readOrCreate(INSTALLATION_ID_FILE, () => newInstallationId());
 }

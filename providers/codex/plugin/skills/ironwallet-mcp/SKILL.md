@@ -156,6 +156,11 @@ Change limits **only when the user explicitly asks**. Do not enable a policy
   **rejected** (fail closed).
 - Do not invent fields beyond these three. After writing, show the resulting
   policy back to the user.
+- The response carries `changes` (before/after per field) and, when the new
+  policy is weaker than the old one, `removed_restrictions` and `warnings`
+  (e.g. "allowedRecipients was removed"). Repeat every warning to the user
+  verbatim. If a restriction disappeared that the user did not ask to drop,
+  call `set_wallet_policy` again with that field included.
 
 ## Transfer
 
@@ -179,8 +184,10 @@ Swaps are a separate flow from transfers.
    Quotes expire. `maxMode: true` sells as much as the service allows; `amount`
    may be omitted then. `execute_swap` is irreversible once submitted; no
    second confirmation.
-5. Poll `get_swap_status` with `operationId`. If execute times out, poll before
-   retrying — do not blindly run execute again.
+5. Poll `get_swap_status` with the `operationId` returned by `execute_swap`.
+   `estimate_swap` is a quote, not an order: it returns no `operationId` and
+   has no status. If execute times out, poll before retrying — do not blindly
+   run execute again.
 
 ## Safety
 
